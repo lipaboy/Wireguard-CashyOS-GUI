@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 WireGuard GUI — прототип
 Требования: python >= 3.12, PyQt6
@@ -6,12 +5,11 @@ WireGuard GUI — прототип
 Запуск:     python wireguard-gui.py
 """
 
-import os
 import subprocess
 from pathlib import Path
 
 from PyQt6.QtGui import QColor, QFont, QIcon, QPalette
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -27,13 +25,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import WgWorker
+
 WG_CONFIG_DIR = Path("/etc/wireguard")
 
 ICON_PATHS = [
-    Path(__file__).parent / "wg.png",
+    Path(__file__).parent / "../wg.png",
     # Path.home() / ".local/share/icons/wireguard.png",
     # Path("/usr/share/icons/wireguard.png"),
 ]
+
 
 def _make_icon() -> QIcon:
     for p in ICON_PATHS:
@@ -42,34 +43,8 @@ def _make_icon() -> QIcon:
     return QIcon.fromTheme("network-vpn")
 
 
-# ─── Worker: запускает wg-quick в отдельном потоке ───────────────────────────
-
-class WgWorker(QThread):
-    finished = pyqtSignal(bool, str)  # (success, output)
-
-    def __init__(self, action: str, iface: str):
-        super().__init__()
-        self.action = action  # "up" | "down"
-        self.iface = iface
-
-    def run(self):
-        try:
-            result = subprocess.run(
-                ["sudo", "wg-quick", self.action, self.iface],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            ok = result.returncode == 0
-            out = result.stdout + result.stderr
-            self.finished.emit(ok, out.strip())
-        except subprocess.TimeoutExpired:
-            self.finished.emit(False, "Timeout: команда выполнялась слишком долго")
-        except Exception as e:
-            self.finished.emit(False, str(e))
-
-
 # ─── Главное окно ─────────────────────────────────────────────────────────────
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -211,8 +186,9 @@ class MainWindow(QMainWindow):
     def _detect_active(self):
         """Определяем уже запущенные wg интерфейсы через `wg show`."""
         try:
-            r = subprocess.run(["wg", "show", "interfaces"],
-                               capture_output=True, text=True)
+            r = subprocess.run(
+                ["wg", "show", "interfaces"], capture_output=True, text=True
+            )
             active = r.stdout.strip().split()
             self._active_iface = active[0] if active else None
         except Exception:
@@ -222,6 +198,8 @@ class MainWindow(QMainWindow):
     def _refresh_list_icons(self):
         for i in range(self.tunnel_list.count()):
             item = self.tunnel_list.item(i)
+            if not item:
+                return
             iface = item.data(Qt.ItemDataRole.UserRole)
             if iface == self._active_iface:
                 item.setText(f"  🟢 {iface}")
@@ -248,7 +226,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.config_view.setPlainText(str(e))
 
-        is_active = (iface == self._active_iface)
+        is_active = iface == self._active_iface
         self._set_status(is_active)
         self.btn_up.setEnabled(not is_active)
         self.btn_down.setEnabled(is_active)
@@ -268,11 +246,13 @@ class MainWindow(QMainWindow):
         if active:
             self.status_badge.setText(" ● Активен ")
             self.status_badge.setStyleSheet(
-                "background:#2d6a2d; color:#7fff7f; border-radius:4px; padding:0 6px;")
+                "background:#2d6a2d; color:#7fff7f; border-radius:4px; padding:0 6px;"
+            )
         else:
             self.status_badge.setText(" ○ Не активен ")
             self.status_badge.setStyleSheet(
-                "background:#444; color:#aaa; border-radius:4px; padding:0 6px;")
+                "background:#444; color:#aaa; border-radius:4px; padding:0 6px;"
+            )
 
     # ── Команды wg-quick ───────────────────────────────────────────────────────
 
@@ -295,7 +275,7 @@ class MainWindow(QMainWindow):
         self.btn_down.setEnabled(False)
         self._log(f"$ sudo wg-quick {action} {iface}")
 
-        self._worker = WgWorker(action, iface)
+        self._worker = WgWorker.WgWorker(action, iface)
         self._worker.finished.connect(self._on_wg_done)
         self._worker.start()
 
@@ -305,20 +285,22 @@ class MainWindow(QMainWindow):
             iface = self._current_iface()
             # Обновляем активный интерфейс
             self._detect_active()
-            is_active = (iface == self._active_iface)
+            is_active = iface == self._active_iface
             self._set_status(is_active)
             self.btn_up.setEnabled(not is_active)
             self.btn_down.setEnabled(is_active)
         else:
             # Возвращаем кнопки в прежнее состояние
             iface = self._current_iface()
-            is_active = (iface == self._active_iface)
+            is_active = iface == self._active_iface
             self.btn_up.setEnabled(not is_active)
             self.btn_down.setEnabled(is_active)
 
     def _log(self, msg: str):
         self.log_view.append(msg)
         sb = self.log_view.verticalScrollBar()
+        if not sb:
+            return
         sb.setValue(sb.maximum())
 
     # ── Стили ──────────────────────────────────────────────────────────────────
@@ -421,6 +403,7 @@ class MainWindow(QMainWindow):
 
 
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
+
 
 def main():
     app = QApplication([])

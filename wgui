@@ -1,0 +1,6 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+#echo "Директория скрипта: $SCRIPT_DIR"
+
+sudo python3 "${SCRIPT_DIR}/source/main.py"
